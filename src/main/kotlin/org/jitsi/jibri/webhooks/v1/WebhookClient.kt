@@ -21,18 +21,19 @@ import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.SignatureAlgorithm
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.apache.Apache
-import io.ktor.client.features.HttpRequestTimeoutException
-import io.ktor.client.features.HttpTimeout
-import io.ktor.client.features.defaultRequest
-import io.ktor.client.features.json.JacksonSerializer
-import io.ktor.client.features.json.JsonFeature
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.HttpRequestBuilder
-import io.ktor.client.request.header
+import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.serialization.jackson.jackson
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -40,6 +41,7 @@ import org.bouncycastle.openssl.PEMKeyPair
 import org.bouncycastle.openssl.PEMParser
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter
 import org.jitsi.jibri.config.Config
+import org.jitsi.jibri.status.JibriSessionStatus
 import org.jitsi.jibri.status.JibriStatus
 import org.jitsi.jibri.util.RefreshingProperty
 import org.jitsi.jibri.util.TaskPools
@@ -64,7 +66,7 @@ class WebhookClient(
     private val webhookSubscribers: MutableSet<String> = CopyOnWriteArraySet()
     private val jwtInfo: JwtInfo? by optionalconfig {
         "jibri.jwt-info".from(Config.configSource)
-            .convertFrom<ConfigObject>(JwtInfo.Companion::fromConfig)
+            .convertFrom(JwtInfo.Companion::fromConfig)
     }
 
     // We refresh 5 minutes before the expiration
@@ -75,22 +77,22 @@ class WebhookClient(
                 .setIssuer(it.issuer)
                 .setAudience(it.audience)
                 .setExpiration(Date.from(clock.instant().plus(it.ttl)))
-                .signWith(SignatureAlgorithm.RS256, it.privateKey)
+                .signWith(it.privateKey, SignatureAlgorithm.RS256)
                 .compact()
         }
     }
 
     private val client = client.config {
         expectSuccess = false
-        install(JsonFeature) {
-            serializer = JacksonSerializer()
+        install(ContentNegotiation) {
+            jackson {}
         }
         install(HttpTimeout) {
             requestTimeoutMillis = 2000
         }
         jwt?.let {
             defaultRequest {
-                header("Authorization", "Bearer $jwt")
+                bearerAuth("$jwt")
             }
         }
     }
@@ -109,12 +111,32 @@ class WebhookClient(
             launch(TaskPools.ioPool.asCoroutineDispatcher()) {
                 logger.debug { "Sending request to $subscriberBaseUrl" }
                 try {
-                    val resp = client.postJson<HttpResponse>("$subscriberBaseUrl/v1/status") {
-                        body = JibriEvent.HealthEvent(jibriId, status)
+                    val resp = client.postJson("$subscriberBaseUrl/v1/status") {
+                        setBody(JibriEvent.HealthEvent(jibriId, status))
                     }
                     logger.debug { "Got response from $subscriberBaseUrl: $resp" }
                     if (resp.status != HttpStatusCode.OK) {
                         logger.error("Error updating health for webhook subscriber $subscriberBaseUrl: $resp")
+                    }
+                } catch (e: HttpRequestTimeoutException) {
+                    logger.error("Request to $subscriberBaseUrl timed out")
+                }
+            }
+        }
+    }
+
+    fun updateSessionStatus(session: JibriSessionStatus) = runBlocking {
+        logger.debug { "Updating ${webhookSubscribers.size} subscribers of the session status" }
+        webhookSubscribers.forEach { subscriberBaseUrl ->
+            launch(TaskPools.ioPool.asCoroutineDispatcher()) {
+                logger.debug { "Sending request to $subscriberBaseUrl" }
+                try {
+                    val resp = client.postJson("$subscriberBaseUrl/v1/session/status") {
+                        setBody(JibriEvent.SessionEvent(jibriId, session))
+                    }
+                    logger.debug { "Got response from $subscriberBaseUrl: $resp" }
+                    if (resp.status != HttpStatusCode.OK) {
+                        logger.error("Error updating session for webhook subscriber $subscriberBaseUrl: $resp")
                     }
                 } catch (e: HttpRequestTimeoutException) {
                     logger.error("Request to $subscriberBaseUrl timed out")
@@ -130,10 +152,10 @@ private val INFINITE = Duration.ofSeconds(Long.MAX_VALUE)
  * Just like [HttpClient.post], but automatically sets the content type to
  * [ContentType.Application.Json].
  */
-private suspend inline fun <reified T> HttpClient.postJson(
+private suspend inline fun HttpClient.postJson(
     urlString: String,
     block: HttpRequestBuilder.() -> Unit = {}
-): T = post(urlString) {
+): HttpResponse = post(urlString) {
     block()
     contentType(ContentType.Application.Json)
 }

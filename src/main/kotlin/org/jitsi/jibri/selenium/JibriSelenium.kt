@@ -23,6 +23,7 @@ import org.jitsi.jibri.config.XmppCredentials
 import org.jitsi.jibri.selenium.pageobjects.CallPage
 import org.jitsi.jibri.selenium.pageobjects.HomePage
 import org.jitsi.jibri.selenium.status_checks.EmptyCallStatusCheck
+import org.jitsi.jibri.selenium.status_checks.IceConnectionStatusCheck
 import org.jitsi.jibri.selenium.status_checks.LocalParticipantKickedStatusCheck
 import org.jitsi.jibri.selenium.status_checks.MediaReceivedStatusCheck
 import org.jitsi.jibri.selenium.util.BrowserFileHandler
@@ -31,6 +32,7 @@ import org.jitsi.jibri.util.StatusPublisher
 import org.jitsi.jibri.util.TaskPools
 import org.jitsi.jibri.util.extensions.scheduleAtFixedRate
 import org.jitsi.jibri.util.getLoggerWithHandler
+import org.jitsi.jibri.util.randomAlphaNum
 import org.jitsi.metaconfig.config
 import org.jitsi.metaconfig.from
 import org.jitsi.utils.logging2.Logger
@@ -80,10 +82,10 @@ data class CallParams(
     override fun toString(): String {
         return if (passcode.isNullOrEmpty()) {
             "CallParams(callUrlInfo=$callUrlInfo, email='$email', passcode=$passcode" +
-                    ", callStatsUsernameOverride=$callStatsUsernameOverride, displayName=$displayName)"
+                ", callStatsUsernameOverride=$callStatsUsernameOverride, displayName=$displayName)"
         } else {
             "CallParams(callUrlInfo=$callUrlInfo, email='$email', passcode=*****" +
-                    ", callStatsUsernameOverride=$callStatsUsernameOverride, displayName=$displayName)"
+                ", callStatsUsernameOverride=$callStatsUsernameOverride, displayName=$displayName)"
         }
     }
 }
@@ -137,20 +139,23 @@ val SIP_GW_URL_OPTIONS = listOf(
     "config.enableEmailInStats=false",
     "config.p2p.enabled=false",
     "config.prejoinPageEnabled=false",
+    "config.prejoinConfig.enabled=false",
     "config.requireDisplayName=false",
     "devices.videoInput=\"PJSUA\""
 )
 
 val RECORDING_URL_OPTIONS = listOf(
-    "config.iAmRecorder=true",
+    "config.analytics.disabled=true",
+    "config.disableInitialGUM=true",
     "config.externalConnectUrl=null",
+    "config.iAmRecorder=true",
+    "config.p2p.enabled=false",
+    "config.prejoinConfig.enabled=false",
+    "config.prejoinPageEnabled=false",
+    "config.requireDisplayName=false",
     "config.startWithAudioMuted=true",
     "config.startWithVideoMuted=true",
-    "interfaceConfig.APP_NAME=\"Jibri\"",
-    "config.analytics.disabled=true",
-    "config.p2p.enabled=false",
-    "config.prejoinPageEnabled=false",
-    "config.requireDisplayName=false"
+    "interfaceConfig.APP_NAME=\"Jibri\""
 )
 
 /**
@@ -221,6 +226,7 @@ class JibriSelenium(
         val callStatusChecks = buildList {
             add(EmptyCallStatusCheck(logger, callEmptyTimeout = jibriSeleniumOptions.emptyCallTimeout))
             add(MediaReceivedStatusCheck(logger))
+            add(IceConnectionStatusCheck(logger))
             if (jibriSeleniumOptions.enableLocalParticipantStatusChecks) {
                 add(LocalParticipantKickedStatusCheck(logger))
             }
@@ -303,8 +309,12 @@ class JibriSelenium(
                     "callStatsUserName" to callStatsUsername
                 )
                 xmppCredentials?.let {
-                    localStorageValues["xmpp_username_override"] =
-                        "${xmppCredentials.username}@${xmppCredentials.domain}"
+                    val username = if (xmppCredentials.randomizeUsername) {
+                        "${xmppCredentials.username}-${randomAlphaNum(8)}"
+                    } else {
+                        xmppCredentials.username
+                    }
+                    localStorageValues["xmpp_username_override"] = "$username@${xmppCredentials.domain}"
                     localStorageValues["xmpp_password_override"] = xmppCredentials.password
                 }
                 passcode?.let {

@@ -16,7 +16,6 @@
  */
 package org.jitsi.jibri.util
 
-import org.jitsi.jibri.util.extensions.pidValue
 import org.jitsi.utils.logging2.Logger
 import org.jitsi.utils.logging2.createChildLogger
 import java.io.InputStream
@@ -40,6 +39,7 @@ class ProcessWrapper(
     private val runtime: Runtime = Runtime.getRuntime()
 ) {
     private val logger = createChildLogger(parentLogger)
+
     /**
      * The actual underlying [Process] this wrapper
      * wraps
@@ -99,7 +99,7 @@ class ProcessWrapper(
         // because we want them to read everything available from the
         // process' inputstream. Once it's done, they'll read
         // the EOF and close things up correctly
-        runtime.exec("kill -s SIGINT ${process.pidValue}")
+        runtime.exec("kill -s SIGINT ${process.pid()}")
     }
 
     /**

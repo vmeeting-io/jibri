@@ -16,6 +16,7 @@
 
 package org.jitsi.jibri.util
 
+import org.jitsi.utils.logging2.createLogger
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -35,13 +36,20 @@ class RefreshingProperty<T>(
     private var value: T? = null
     private var valueCreationTimestamp: Instant? = null
 
+    private val logger = createLogger()
+
     @Synchronized
     operator fun getValue(thisRef: Any?, property: KProperty<*>): T? {
         val now = clock.instant()
         if (valueExpired(now)) {
             value = try {
+                logger.debug("Refreshing property ${property.name} (not yet initialized or expired)...")
                 creationFunc()
-            } catch (t: Throwable) {
+            } catch (exception: Exception) {
+                logger.warn(
+                    "Property refresh caused exception, will use null for property ${property.name}: ",
+                    exception
+                )
                 null
             }
             valueCreationTimestamp = now

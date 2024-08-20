@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2018 Atlassian Pty Ltd
+ * Copyright @ 2024-Present 8x8, Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,21 +14,8 @@
  * limitations under the License.
  *
  */
+package org.jitsi.jibri.metrics
 
-package org.jitsi.jibri.sink.impl
+import org.jitsi.metrics.MetricsContainer
 
-import org.jitsi.jibri.sink.Sink
-
-/**
- * [StreamSink] represents a sink which will write to a network stream
- */
-class StreamSink(val url: String, val streamingMaxBitrate: Int, val streamingBufSize: Int) : Sink {
-    override val path: String = url
-    override val format: String = "flv"
-    override val options: Array<String> = arrayOf(
-        "-maxrate",
-        "${streamingMaxBitrate}k",
-        "-bufsize",
-        "${streamingBufSize}k"
-    )
-}
+object JibriMetricsContainer : MetricsContainer(namespace = "jitsi_jibri")

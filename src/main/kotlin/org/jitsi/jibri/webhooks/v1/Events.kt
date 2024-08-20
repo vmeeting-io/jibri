@@ -1,4 +1,4 @@
-// ktlint-disable filename
+
 
 /*
  * Copyright @ 2018 - present 8x8, Inc.
@@ -16,10 +16,14 @@
  * limitations under the License.
  */
 
+@file:Suppress("ktlint:standard:filename")
+
 package org.jitsi.jibri.webhooks.v1
 
+import org.jitsi.jibri.status.JibriSessionStatus
 import org.jitsi.jibri.status.JibriStatus
 
 sealed class JibriEvent(val jibriId: String) {
     class HealthEvent(jibriId: String, val status: JibriStatus) : JibriEvent(jibriId)
+    class SessionEvent(jibriId: String, val session: JibriSessionStatus) : JibriEvent(jibriId)
 }

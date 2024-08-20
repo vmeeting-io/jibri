@@ -25,6 +25,7 @@ class EmptyCallStatusCheck(
     init {
         logger.info("Starting empty call check with a timeout of $callEmptyTimeout")
     }
+
     // The timestamp at which we last saw the call transition from
     // non-empty to empty
     private val callWentEmptyTime = StateTransitionTimeTracker(clock)
@@ -45,9 +46,6 @@ class EmptyCallStatusCheck(
             false -> null
         }
     }
-
-    // <= 1 since the count will include jibri itself
-    private fun CallPage.isCallEmpty() = getNumParticipants() <= 1
 
     companion object {
         val defaultCallEmptyTimeout: Duration by config {

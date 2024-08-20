@@ -74,11 +74,12 @@ class CallPage(driver: RemoteWebDriver) : AbstractPageObject(driver) {
         return result
     }
 
+    /** Returns the number of participants excluding hidden participants. */
     fun getNumParticipants(): Int {
         val result = driver.executeScript(
             """
             try {
-                return APP.conference.membersCount;
+                return (APP.conference._room.getParticipants().$PARTICIPANT_FILTER_SCRIPT).length + 1;
             } catch (e) {
                 return e.message;
             }
@@ -89,6 +90,11 @@ class CallPage(driver: RemoteWebDriver) : AbstractPageObject(driver) {
             else -> 1
         }
     }
+
+    /**
+     * Return true if there are no other participants in the conference.
+     */
+    fun isCallEmpty() = getNumParticipants() <= 1
 
     @Suppress("UNCHECKED_CAST")
     private fun getStats(): Map<String, Any?> {
@@ -134,7 +140,7 @@ class CallPage(driver: RemoteWebDriver) : AbstractPageObject(driver) {
                     "xmpp.muc_member_joined",
                     (from, nick, role, hidden, statsid, status, identity) => {
                         console.log("Jibri got MUC_MEMBER_JOINED: ", from, identity);
-                        if (identity) {
+                        if (!hidden && identity) {
                             window._jibriParticipants.push(identity);
                         }
                     }
@@ -198,13 +204,15 @@ class CallPage(driver: RemoteWebDriver) : AbstractPageObject(driver) {
     }
 
     /**
-     * Return how many of the participants are Jigasi clients
+     * Return how many of the participants are Jigasi clients.
+     * Note: excludes any participants that are hidden (for example transcribers)
      */
     fun numRemoteParticipantsJigasi(): Int {
         val result = driver.executeScript(
             """
             try {
                 return APP.conference._room.getParticipants()
+                    .$PARTICIPANT_FILTER_SCRIPT
                     .filter(participant => participant.getProperty("features_jigasi") == true)
                     .length;
             } catch (e) {
@@ -217,6 +225,48 @@ class CallPage(driver: RemoteWebDriver) : AbstractPageObject(driver) {
             else -> {
                 logger.error("error running numRemoteParticipantsJigasi script: $result ${result::class.java}")
                 0
+            }
+        }
+    }
+
+    /** How many of the participants are hidden or hiddenFromRecorder. */
+    fun numHiddenParticipants(): Int {
+        val result = driver.executeScript(
+            """
+            try {
+                return APP.conference._room.getParticipants()
+                    .filter(p => (p.isHidden() || p.isHiddenFromRecorder()))
+                    .length;
+            } catch (e) {
+                return e.message;
+            }
+            """.trimMargin()
+        )
+        return when (result) {
+            is Number -> result.toInt()
+            else -> {
+                logger.error("error running numHiddenParticipants script: $result ${result::class.java}")
+                0
+            }
+        }
+    }
+
+    /**
+     * Return true if ICE is connected.
+     */
+    fun isIceConnected(): Boolean {
+        val result: Any? = driver.executeScript(
+            """
+            try {
+                return APP.conference.getConnectionState();
+            } catch(e) {
+                return e.message;
+            }
+        """
+        )
+        return (result.toString().lowercase() == "connected").also {
+            if (!it) {
+                logger.warn("ICE not connected: $result")
             }
         }
     }
@@ -240,14 +290,18 @@ class CallPage(driver: RemoteWebDriver) : AbstractPageObject(driver) {
 
     /**
      * Returns a count of how many remote participants are totally muted (audio
-     * and video).
+     * and video). We ignore jigasi participants as they maybe muted in their presence
+     * but also hard muted via the device, and we later ignore their state.
+     * Note: Excludes hidden participants.
      */
     fun numRemoteParticipantsMuted(): Int {
         val result = driver.executeScript(
             """
             try {
                 return APP.conference._room.getParticipants()
-                    .filter(participant => participant.isAudioMuted() && participant.isVideoMuted())
+                    .$PARTICIPANT_FILTER_SCRIPT
+                    .filter(participant => participant.isAudioMuted() && participant.isVideoMuted() 
+                                && participant.getProperty("features_jigasi") !== true)
                     .length;
             } catch (e) {
                 return e.message;
@@ -325,5 +379,12 @@ class CallPage(driver: RemoteWebDriver) : AbstractPageObject(driver) {
             is String -> false
             else -> true
         }
+    }
+
+    companion object {
+        /**
+         * Javascript to apply a filter to the list of participants to exclude ones which should be hidden from jibri.
+         */
+        const val PARTICIPANT_FILTER_SCRIPT = "filter(p => !(p.isHidden() || p.isHiddenFromRecorder()))"
     }
 }

@@ -10,22 +10,27 @@
 
     <properties>
         <selenium.version>3.12.0</selenium.version>
-        <kotlin.version>1.4.31</kotlin.version>
+        <kotlin.version>1.9.10</kotlin.version>
         <exec.mainClass>org.jitsi.jibri.MainKt</exec.mainClass>
-        <maven.compiler.source>1.8</maven.compiler.source>
-        <maven.compiler.target>1.8</maven.compiler.target>
-        <kotlin.compiler.jvmTarget>1.8</kotlin.compiler.jvmTarget>
-        <smack.version>4.4.3</smack.version>
-        <jersey.version>2.30.1</jersey.version>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <kotlin.compiler.jvmTarget>11</kotlin.compiler.jvmTarget>
         <jackson.version>2.9.5</jackson.version>
-        <junit.version>5.2.0</junit.version>
-        <kotest.version>4.4.3</kotest.version>
-        <mockk.version>1.10.0</mockk.version>
-        <ktor.version>1.5.2</ktor.version>
-        <jicoco.version>1.1-95-gd8fd866</jicoco.version>
+        <junit.version>5.10.0</junit.version>
+        <kotest.version>5.7.2</kotest.version>
+        <mockk.version>1.13.8</mockk.version>
+        <ktor.version>2.3.4</ktor.version>
+        <jwt.version>0.11.5</jwt.version>
+        <jicoco.version>1.1-127-gf49982f</jicoco.version>
+        <jitsi.utils.version>1.0-127-g6c65524</jitsi.utils.version>
     </properties>
 
     <dependencies>
+       <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>1.75</version>
+        </dependency>
         <dependency>
             <groupId>${project.groupId}</groupId>
             <artifactId>jicoco</artifactId>
@@ -97,28 +102,10 @@
             <artifactId>argparse4j</artifactId>
             <version>0.8.1</version>
         </dependency>
-        <!-- Explicitly add this dep to match what ktor-server-jetty needs (otherwise
-        jicoco will bring in an older version -->
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-util</artifactId>
-            <version>9.4.24.v20191120</version>
-        </dependency>
         <dependency>
             <groupId>${project.groupId}</groupId>
             <artifactId>jitsi-xmpp-extensions</artifactId>
-            <version>1.0-26-g67e8beb</version>
-        </dependency>
-        <dependency>
-            <groupId>${project.groupId}</groupId>
-            <artifactId>jitsi-utils</artifactId>
-            <version>1.0-82-gcab10f0</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.jetbrains.kotlin</groupId>
-                    <artifactId>kotlin-osgi-bundle</artifactId>
-                </exclusion>
-            </exclusions>
+            <version>1.0-78-g62d03d4</version>
         </dependency>
         <dependency>
             <groupId>com.datadoghq</groupId>
@@ -126,7 +113,7 @@
             <version>2.5</version>
         </dependency>
         <dependency>
-            <groupId>com.github.tinder</groupId>
+            <groupId>com.tinder.statemachine</groupId>
             <artifactId>statemachine</artifactId>
             <version>0.2.0</version>
             <exclusions>
@@ -137,45 +124,55 @@
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>org.jitsi</groupId>
-            <artifactId>jitsi-util</artifactId>
-            <version>2.13.df50add</version>
-        </dependency>
-        <dependency>
             <groupId>io.ktor</groupId>
-            <artifactId>ktor-client-apache</artifactId>
+            <artifactId>ktor-client-apache-jvm</artifactId>
             <version>${ktor.version}</version>
         </dependency>
         <dependency>
             <groupId>io.ktor</groupId>
-            <artifactId>ktor-client-jackson</artifactId>
+            <artifactId>ktor-client-jackson-jvm</artifactId>
             <version>${ktor.version}</version>
         </dependency>
         <dependency>
             <groupId>io.ktor</groupId>
-            <artifactId>ktor-server-core</artifactId>
+            <artifactId>ktor-server-core-jvm</artifactId>
             <version>${ktor.version}</version>
         </dependency>
         <dependency>
             <groupId>io.ktor</groupId>
-            <artifactId>ktor-server-jetty</artifactId>
+            <artifactId>ktor-server-jetty-jakarta-jvm</artifactId>
             <version>${ktor.version}</version>
         </dependency>
         <dependency>
             <groupId>io.ktor</groupId>
-            <artifactId>ktor-jackson</artifactId>
+            <artifactId>ktor-serialization-jackson-jvm</artifactId>
+            <version>${ktor.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-server-content-negotiation-jvm</artifactId>
+            <version>${ktor.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-client-content-negotiation-jvm</artifactId>
             <version>${ktor.version}</version>
         </dependency>
         <dependency>
             <groupId>${project.groupId}</groupId>
             <artifactId>jitsi-metaconfig</artifactId>
-            <version>8fa8f1170a</version>
+            <version>1.0-11-g8cf950e</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.jetbrains.kotlin</groupId>
                     <artifactId>kotlin-stdlib-jdk8</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>jitsi-utils</artifactId>
+            <version>${jitsi.utils.version}</version>
         </dependency>
         <dependency>
             <groupId>com.typesafe</groupId>
@@ -184,21 +181,27 @@
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
-            <artifactId>jjwt</artifactId>
-            <version>0.9.1</version>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jwt.version}</version>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- testing -->
         <dependency>
             <groupId>org.jitsi</groupId>
             <artifactId>jicoco-test-kotlin</artifactId>
-            <version>1.1-79-g6099be5</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.jetbrains.kotlin</groupId>
-                    <artifactId>kotlin-stdlib-jdk8</artifactId>
-                </exclusion>
-            </exclusions>
+            <version>${jicoco.version}</version>
         </dependency>
         <dependency>
             <groupId>io.kotest</groupId>
@@ -226,7 +229,7 @@
         </dependency>
         <dependency>
             <groupId>io.mockk</groupId>
-            <artifactId>mockk</artifactId>
+            <artifactId>mockk-jvm</artifactId>
             <version>${mockk.version}</version>
             <scope>test</scope>
         </dependency>
@@ -237,7 +240,20 @@
         </dependency>
         <dependency>
             <groupId>io.ktor</groupId>
-            <artifactId>ktor-server-test-host</artifactId>
+            <artifactId>ktor-server-test-host-jvm</artifactId>
+            <version>${ktor.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                  <groupId>io.ktor</groupId>
+                  <artifactId>ktor-client-jetty-jvm</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Force ktor-server-test-host to use a compatible jetty version. -->
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-client-jetty-jakarta-jvm</artifactId>
             <version>${ktor.version}</version>
             <scope>test</scope>
         </dependency>
@@ -253,6 +269,12 @@
             <artifactId>memoryfilesystem</artifactId>
             <version>1.2.1</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.jitsi</groupId>
+            <artifactId>jicoco-metrics</artifactId>
+            <version>1.1-133-g768ef2e</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 
@@ -293,8 +315,8 @@
                             </sourceDirs>
                             <args>
                                 <arg>-Werror</arg>
-                                <arg>-Xopt-in=kotlin.ExperimentalStdlibApi</arg>
-                                <arg>-Xopt-in=kotlin.time.ExperimentalTime</arg>
+                                <arg>-opt-in=kotlin.ExperimentalStdlibApi</arg>
+                                <arg>-opt-in=kotlin.time.ExperimentalTime</arg>
                             </args>
                         </configuration>
                     </execution>
@@ -345,6 +367,7 @@
                         <!-- gradle.build.dir is the property name that JunitXmlReporter expects to find, even though
                         this is maven -->
                         <gradle.build.dir>${project.build.directory}/surefire-reports</gradle.build.dir>
+                        <java.util.logging.config.file>${project.basedir}/lib/test-logging.properties</java.util.logging.config.file>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
@@ -386,52 +409,25 @@
                 </executions>
             </plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <version>1.8</version>
+                <groupId>com.github.gantsign.maven</groupId>
+                <artifactId>ktlint-maven-plugin</artifactId>
+                <version>3.0.0</version>
+                <configuration>
+                    <sourceRoots>
+                        <sourceRoot>${project.basedir}/src/main/kotlin</sourceRoot>
+                    </sourceRoots>
+                    <testSourceRoots>
+                        <testSourceRoot>${project.basedir}/src/test/kotlin</testSourceRoot>
+                    </testSourceRoots>
+                </configuration>
                 <executions>
                     <execution>
-                        <id>ktlint</id>
-                        <phase>verify</phase>
-                        <configuration>
-                            <skip>${ktlint.skip}</skip>
-                            <target name="ktlint">
-                                <java taskname="ktlint" dir="${basedir}" fork="true" failonerror="true"
-                                    classpathref="maven.plugin.classpath" classname="com.pinterest.ktlint.Main">
-                                    <arg value="src/**/*.kt"/>
-                                    <!-- to generate report in checkstyle format prepend following args: -->
-                                    <!-- 
-                                    <arg value="[dash][dash]reporter=plain"/>
-                                    <arg value="[dash][dash]reporter=checkstyle,output=${project.build.directory}/ktlint.xml"/>
-                                    -->
-                                    <!-- see https://github.com/shyiko/ktlint#usage for more -->                    
-                                </java>
-                            </target>
-                        </configuration>
-                        <goals><goal>run</goal></goals>
-                    </execution>
-                    <execution>
-                        <id>ktlint-format</id>
-                        <configuration>
-                            <target name="ktlint">
-                                <java taskname="ktlint" dir="${basedir}" fork="true" failonerror="true"
-                                    classpathref="maven.plugin.classpath" classname="com.pinterest.ktlint.Main">
-                                    <arg value="-F"/>
-                                    <arg value="src/**/*.kt"/>
-                                </java>
-                            </target>
-                        </configuration>
-                        <goals><goal>run</goal></goals>
+                        <id>check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
                     </execution>
                 </executions>
-                <dependencies>
-                    <dependency>
-                        <groupId>com.pinterest</groupId>
-                        <artifactId>ktlint</artifactId>
-                        <version>0.36.0</version>
-                    </dependency>
-                    <!-- additional 3rd party ruleset(s) can be specified here -->
-                </dependencies>
             </plugin>
         </plugins>
     </build>
@@ -461,17 +457,13 @@
             </snapshots>
             <url>https://github.com/jitsi/jitsi-maven-repository/raw/master/snapshots/</url>
         </repository>
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
     </repositories>
 
     <profiles>
         <profile>
             <id>coverage</id>
             <properties>
-                <jacoco.version>0.8.6</jacoco.version>
+                <jacoco.version>0.8.8</jacoco.version>
             </properties>
             <build>
                 <plugins>

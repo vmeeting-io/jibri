@@ -40,16 +40,18 @@ import org.jitsi.utils.logging2.createLogger
 import org.jitsi.xmpp.extensions.jibri.JibriIq
 import org.jitsi.xmpp.extensions.jibri.JibriIqProvider
 import org.jitsi.xmpp.extensions.jibri.JibriStatusPacketExt
+import org.jitsi.xmpp.mucclient.ConnectionStateListener
 import org.jitsi.xmpp.mucclient.IQListener
 import org.jitsi.xmpp.mucclient.MucClient
 import org.jitsi.xmpp.mucclient.MucClientConfiguration
 import org.jitsi.xmpp.mucclient.MucClientManager
+import org.jitsi.xmpp.util.XmlStringBuilderUtil.Companion.toStringOpt
+import org.jivesoftware.smack.ConnectionConfiguration
 import org.jivesoftware.smack.packet.IQ
 import org.jivesoftware.smack.packet.StanzaError
 import org.jivesoftware.smack.provider.ProviderManager
 import org.jivesoftware.smackx.ping.PingManager
 import org.jxmpp.jid.impl.JidCreate
-import kotlin.random.Random
 
 private class UnsupportedIqMode(val iqMode: String) : Exception()
 
@@ -67,9 +69,57 @@ private class UnsupportedIqMode(val iqMode: String) : Exception()
 class XmppApi(
     private val jibriManager: JibriManager,
     private val xmppConfigs: List<XmppEnvironmentConfig>,
-    private val jibriStatusManager: JibriStatusManager
+    private val jibriStatusManager: JibriStatusManager,
 ) : IQListener {
     private val logger = createLogger()
+
+    private val connectionStateListener = object : ConnectionStateListener {
+        override fun connected(mucClient: MucClient) {
+            jibriManager.jibriMetrics.xmppConnected(mucClient.tags())
+        }
+        override fun reconnecting(mucClient: MucClient) {
+            jibriManager.jibriMetrics.xmppReconnecting(mucClient.tags())
+        }
+        override fun reconnectionFailed(mucClient: MucClient) {
+            jibriManager.jibriMetrics.xmppReconnectionFailed(mucClient.tags())
+        }
+        override fun pingFailed(mucClient: MucClient) {
+            jibriManager.jibriMetrics.xmppPingFailed(mucClient.tags())
+        }
+
+        /**
+         * If XMPP disconnects we lost our communication channel with jicofo. Jicofo currently doesn't attempt to
+         * communicate later, and starts a new session (with a different jibri) immediately. Make sure in this case the
+         * recording is stopped.
+         */
+        override fun closed(mucClient: MucClient) {
+            jibriManager.jibriMetrics.xmppClosed(mucClient.tags())
+            maybeStop(mucClient)
+        }
+
+        /**
+         * If XMPP disconnects we lost our communication channel with jicofo. Jicofo currently doesn't attempt to
+         * communicate later, and starts a new session (with a different jibri) immediately. Make sure in this case the
+         * recording is stopped.
+         */
+        override fun closedOnError(mucClient: MucClient) {
+            jibriManager.jibriMetrics.xmppClosedOnError(mucClient.tags())
+            maybeStop(mucClient)
+        }
+
+        private fun maybeStop(mucClient: MucClient) {
+            val xmppEnvironment = getXmppEnvironment(mucClient) ?: return
+            val environmentContext = createEnvironmentContext(xmppEnvironment, mucClient)
+            if (jibriManager.currentEnvironmentContext == environmentContext) {
+                logger.warn("XMPP disconnected, stopping.")
+                jibriManager.jibriMetrics.stoppedOnXmppClosed(mucClient.tags())
+                jibriManager.stopService()
+            }
+        }
+
+        /** Create statsd tags for a [MucClient]. */
+        private fun MucClient.tags() = "xmpp_server_host:$id"
+    }
     private lateinit var mucClientManager: MucClientManager
 
     /**
@@ -83,27 +133,36 @@ class XmppApi(
         PingManager.setDefaultPingInterval(30)
         JibriStatusPacketExt.registerExtensionProvider()
         ProviderManager.addIQProvider(
-            JibriIq.ELEMENT_NAME, JibriIq.NAMESPACE, JibriIqProvider()
+            JibriIq.ELEMENT,
+            JibriIq.NAMESPACE,
+            JibriIqProvider()
         )
         updatePresence(jibriStatusManager.overallStatus)
         jibriStatusManager.addStatusHandler(::updatePresence)
 
         mucClientManager.registerIQ(JibriIq())
         mucClientManager.setIQListener(this)
+        mucClientManager.addConnectionStateListener(connectionStateListener)
 
         // Join all the MUCs we've been told to
         for (config in xmppConfigs) {
             for (host in config.xmppServerHosts) {
                 logger.info("Connecting to xmpp environment on $host with config $config")
+                val hostDetails: List<String> = host.split(":")
 
                 // We need to use the host as the ID because we'll only get one MUC client per 'ID' and
                 // we may have multiple hosts for the same environment
                 val clientConfig = MucClientConfiguration(host).apply {
-                    hostname = host
+                    hostname = hostDetails[0]
                     domain = config.controlLogin.domain
                     username = config.controlLogin.username
                     password = config.controlLogin.password
-                    config.controlLogin.port?.let { port = it.toString() }
+
+                    if (hostDetails.size > 1) {
+                        port = hostDetails[1]
+                    } else {
+                        config.controlLogin.port?.let { port = it.toString() }
+                    }
 
                     if (config.trustAllXmppCerts) {
                         logger.info(
@@ -112,6 +171,13 @@ class XmppApi(
                         )
                         disableCertificateVerification = config.trustAllXmppCerts
                     }
+
+                    if (config.securityMode == ConnectionConfiguration.SecurityMode.disabled) {
+                        logger.info(
+                            "XMPP security is disabled for this domain, no TLS will be used."
+                        )
+                    }
+                    securityMode = config.securityMode
 
                     val recordingMucJid =
                         JidCreate.bareFrom("${config.controlMuc.roomName}@${config.controlMuc.domain}").toString()
@@ -122,9 +188,6 @@ class XmppApi(
                     }
                     mucJids = listOfNotNull(recordingMucJid, sipMucJid)
                     mucNickname = config.controlMuc.nickname
-                    if (config.randomizeControlMucNickname) {
-                        mucNickname += "-${Random.nextInt(1000)}"
-                    }
                 }
 
                 mucClientManager.addMucClient(clientConfig)
@@ -164,8 +227,8 @@ class XmppApi(
      * that this [JibriIq] was received on.
      */
     private fun handleJibriIq(jibriIq: JibriIq, mucClient: MucClient): IQ {
-        logger.info("Received JibriIq ${jibriIq.toXML()} from environment $mucClient")
-        val xmppEnvironment = xmppConfigs.find { it.xmppServerHosts.contains(mucClient.id) }
+        logger.info("Received JibriIq ${jibriIq.toStringOpt()} from environment $mucClient")
+        val xmppEnvironment = getXmppEnvironment(mucClient)
             ?: return IQ.createErrorResponse(
                 jibriIq,
                 StanzaError.getBuilder().setCondition(StanzaError.Condition.bad_request).build()
@@ -178,6 +241,10 @@ class XmppApi(
                 StanzaError.getBuilder().setCondition(StanzaError.Condition.bad_request).build()
             )
         }
+    }
+
+    private fun getXmppEnvironment(mucClient: MucClient) = xmppConfigs.find {
+        it.xmppServerHosts.contains(mucClient.id)
     }
 
     /**
@@ -199,7 +266,12 @@ class XmppApi(
         // if it changes
         val serviceStatusHandler = createServiceStatusHandler(startJibriIq, mucClient)
         return try {
-            handleStartService(startJibriIq, xmppEnvironment, serviceStatusHandler)
+            handleStartService(
+                startJibriIq,
+                xmppEnvironment,
+                createEnvironmentContext(xmppEnvironment, mucClient),
+                serviceStatusHandler
+            )
             logger.info("Sending 'pending' response to start IQ")
             startJibriIq.createResult {
                 status = JibriIq.Status.PENDING
@@ -238,7 +310,7 @@ class XmppApi(
                         shouldRetry = serviceState.error.shouldRetry()
                         logger.info(
                             "Current service had an error ${serviceState.error}, " +
-                                "sending error iq ${toXML()}"
+                                "sending error iq ${toStringOpt()}"
                         )
                         mucClient.sendStanza(this)
                     }
@@ -246,14 +318,14 @@ class XmppApi(
                 is ComponentState.Finished -> {
                     with(JibriIqHelper.create(request.from, status = JibriIq.Status.OFF)) {
                         sipAddress = request.sipAddress
-                        logger.info("Current service finished, sending off iq ${toXML()}")
+                        logger.info("Current service finished, sending off iq ${toStringOpt()}")
                         mucClient.sendStanza(this)
                     }
                 }
                 is ComponentState.Running -> {
                     with(JibriIqHelper.create(request.from, status = JibriIq.Status.ON)) {
                         sipAddress = request.sipAddress
-                        logger.info("Current service started up successfully, sending on iq ${toXML()}")
+                        logger.info("Current service started up successfully, sending on iq ${toStringOpt()}")
                         mucClient.sendStanza(this)
                     }
                 }
@@ -284,6 +356,7 @@ class XmppApi(
     private fun handleStartService(
         startIq: JibriIq,
         xmppEnvironment: XmppEnvironmentConfig,
+        environmentContext: EnvironmentContext,
         serviceStatusHandler: JibriServiceStatusHandler
     ) {
         val callUrlInfo = getCallUrlInfoFromJid(
@@ -304,7 +377,7 @@ class XmppApi(
                 jibriManager.startFileRecording(
                     serviceParams,
                     FileRecordingRequestParams(callParams, startIq.sessionId, xmppEnvironment.callLogin),
-                    EnvironmentContext(xmppEnvironment.name),
+                    environmentContext,
                     serviceStatusHandler
                 )
             }
@@ -333,7 +406,7 @@ class XmppApi(
                         rtmpUrl = rtmpUrl,
                         viewingUrl = viewingUrl
                     ),
-                    EnvironmentContext(xmppEnvironment.name),
+                    environmentContext,
                     serviceStatusHandler
                 )
             }
@@ -345,7 +418,7 @@ class XmppApi(
                         xmppEnvironment.callLogin,
                         SipClientParams(startIq.sipAddress, startIq.displayName)
                     ),
-                    EnvironmentContext(xmppEnvironment.name),
+                    environmentContext,
                     serviceStatusHandler
                 )
             }
@@ -360,3 +433,6 @@ private fun String.isRtmpUrl(): Boolean =
     startsWith("rtmp://", ignoreCase = true) || startsWith("rtmps://", ignoreCase = true)
 private fun String.isViewingUrl(): Boolean =
     startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
+
+private fun createEnvironmentContext(xmppEnvironment: XmppEnvironmentConfig, mucClient: MucClient) =
+    EnvironmentContext("${xmppEnvironment.name}-${mucClient.id}")

@@ -1,5 +1,5 @@
 /*
- * Copyright @ 2018 Atlassian Pty Ltd
+ * Copyright @ 2024 - present 8x8, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,15 +12,12 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-package org.jitsi.jibri.statsd
+package org.jitsi.jibri.util
 
-const val ASPECT_START = "start"
-const val ASPECT_STOP = "stop"
-const val ASPECT_BUSY = "busy"
-const val ASPECT_ERROR = "error"
+import kotlin.random.Random
 
-const val TAG_SERVICE_RECORDING = "recording"
-const val TAG_SERVICE_LIVE_STREAM = "live_stream"
-const val TAG_SERVICE_SIP_GATEWAY = "sip_gateway"
+val alphaNum = ('a'..'z') + ('0'..'9')
+fun randomAlphaNum(len: Int): String {
+    return List(len) { alphaNum[Random.nextInt(0, alphaNum.size)] }.joinToString("")
+}

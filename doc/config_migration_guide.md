@@ -92,6 +92,8 @@ New method: in `jibri.conf`:
 jibri {
     stats {
         enable-stats-d = <boolean>
+        host = <string>
+        port = <int>
     }
 }
 ```

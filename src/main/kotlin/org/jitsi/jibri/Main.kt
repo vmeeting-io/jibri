@@ -18,7 +18,7 @@
 package org.jitsi.jibri
 
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.jetty.Jetty
+import io.ktor.server.jetty.jakarta.Jetty
 import kotlinx.coroutines.CancellationException
 import net.sourceforge.argparse4j.ArgumentParsers
 import org.jitsi.jibri.api.http.HttpApi
@@ -77,6 +77,9 @@ fun main(args: Array<String>) {
 
     jibriStatusManager.addStatusHandler {
         webhookClient.updateStatus(it)
+    }
+    jibriStatusManager.addStatusHandler {
+        jibriManager.jibriMetrics.updateStatus(it)
     }
     webhookSubscribers.forEach(webhookClient::addSubscriber)
     val statusUpdaterTask = TaskPools.recurringTasksPool.scheduleAtFixedRate(
@@ -151,7 +154,7 @@ fun main(args: Array<String>) {
     logger.info("Using port ${HttpApi.port} for HTTP API")
 
     // HttpApi
-    with(HttpApi(jibriManager, jibriStatusManager)) {
+    with(HttpApi(jibriManager, jibriStatusManager, webhookClient)) {
         embeddedServer(Jetty, port = HttpApi.port) {
             apiModule()
         }

@@ -17,6 +17,7 @@
 
 package org.jitsi.jibri.config
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.exc.InvalidFormatException
@@ -25,26 +26,28 @@ import com.fasterxml.jackson.module.kotlin.MissingKotlinParameterException
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.jitsi.jibri.logger
+import org.jivesoftware.smack.ConnectionConfiguration
 import java.io.File
 
 data class XmppCredentials(
     val domain: String = "",
     val port: Int? = null,
     val username: String = "",
-    val password: String = ""
+    val password: String = "",
+    val randomizeUsername: Boolean = false
 ) {
     override fun toString(): String {
         return "XmppCredentials(domain=$domain, port=$port, username=$username, password=*****)"
     }
 }
 
-fun com.typesafe.config.Config.toXmppCredentials(): XmppCredentials =
-    XmppCredentials(
-        domain = getString("domain"),
-        port = if (hasPath("port")) getInt("port") else null,
-        username = getString("username"),
-        password = getString("password")
-    )
+fun com.typesafe.config.Config.toXmppCredentials(): XmppCredentials = XmppCredentials(
+    domain = getString("domain"),
+    port = if (hasPath("port")) getInt("port") else null,
+    username = getString("username"),
+    password = getString("password"),
+    randomizeUsername = if (hasPath("randomize-username")) getBoolean("randomize-username") else false
+)
 
 data class XmppMuc(
     val domain: String,
@@ -53,12 +56,11 @@ data class XmppMuc(
     val nickname: String
 )
 
-fun com.typesafe.config.Config.toXmppMuc(): XmppMuc =
-    XmppMuc(
-        domain = getString("domain"),
-        roomName = getString("room-name"),
-        nickname = getString("nickname")
-    )
+fun com.typesafe.config.Config.toXmppMuc(): XmppMuc = XmppMuc(
+    domain = getString("domain"),
+    roomName = getString("room-name"),
+    nickname = getString("nickname")
+)
 
 data class XmppEnvironmentConfig(
     /**
@@ -125,31 +127,39 @@ data class XmppEnvironmentConfig(
     @JsonProperty("always_trust_certs")
     val trustAllXmppCerts: Boolean = true,
     /**
-     * Whether to append a randomly generated string to the nickname used in the control MUC.
+     * The XMPP security mode to use for the XMPP connection
      */
-    @JsonProperty("randomize_control_muc_nickname")
-    val randomizeControlMucNickname: Boolean = false
+    @JsonProperty("security_mode")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    val securityMode: ConnectionConfiguration.SecurityMode? = null
 )
 
-fun com.typesafe.config.Config.toXmppEnvironment(): XmppEnvironmentConfig =
-    XmppEnvironmentConfig(
-        name = getString("name"),
-        xmppServerHosts = getStringList("xmpp-server-hosts"),
-        xmppDomain = getString("xmpp-domain"),
-        baseUrl = if (hasPath("base-url")) {
-            getString("base-url")
-        } else null,
-        controlLogin = getConfig("control-login").toXmppCredentials(),
-        controlMuc = getConfig("control-muc").toXmppMuc(),
-        sipControlMuc = if (hasPath("sip-control-muc")) {
-            getConfig("sip-control-muc").toXmppMuc()
-        } else null,
-        callLogin = getConfig("call-login").toXmppCredentials(),
-        stripFromRoomDomain = getString("strip-from-room-domain"),
-        usageTimeoutMins = getDuration("usage-timeout").toMinutes().toInt(),
-        trustAllXmppCerts = getBoolean("trust-all-xmpp-certs"),
-        randomizeControlMucNickname = getBoolean("randomize-control-muc-nickname")
-    )
+fun com.typesafe.config.Config.toXmppEnvironment(): XmppEnvironmentConfig = XmppEnvironmentConfig(
+    name = getString("name"),
+    xmppServerHosts = getStringList("xmpp-server-hosts"),
+    xmppDomain = getString("xmpp-domain"),
+    baseUrl = if (hasPath("base-url")) {
+        getString("base-url")
+    } else {
+        null
+    },
+    controlLogin = getConfig("control-login").toXmppCredentials(),
+    controlMuc = getConfig("control-muc").toXmppMuc(),
+    sipControlMuc = if (hasPath("sip-control-muc")) {
+        getConfig("sip-control-muc").toXmppMuc()
+    } else {
+        null
+    },
+    callLogin = getConfig("call-login").toXmppCredentials(),
+    stripFromRoomDomain = getString("strip-from-room-domain"),
+    usageTimeoutMins = getDuration("usage-timeout").toMinutes().toInt(),
+    trustAllXmppCerts = getBoolean("trust-all-xmpp-certs"),
+    securityMode = if (hasPath("security-mode")) {
+        getEnum(ConnectionConfiguration.SecurityMode::class.java, "security-mode")
+    } else {
+        null
+    }
+)
 
 data class JibriConfig(
     @JsonProperty("jibri_id")

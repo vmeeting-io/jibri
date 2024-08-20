@@ -16,8 +16,10 @@
  */
 package org.jitsi.jibri.status
 
+import org.jitsi.jibri.error.JibriError
 import org.jitsi.jibri.util.StatusPublisher
 import org.jitsi.utils.logging.Logger
+import org.jitsi.xmpp.extensions.jibri.JibriIq
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.properties.Delegates
 
@@ -46,6 +48,19 @@ data class JibriStatus(
     val health: OverallHealth
 )
 
+data class JibriFailure(
+    val reason: JibriIq.FailureReason? = null,
+    val error: JibriError? = null
+)
+
+data class JibriSessionStatus(
+    val sessionId: String,
+    val status: JibriIq.Status,
+    val sipAddress: String? = null,
+    val failure: JibriFailure? = null,
+    val shouldRetry: Boolean? = null
+)
+
 /**
  * Models Jibri's overall status which currently consists of 2 things:
  * 1) Its 'busy' status: whether or not this Jibri is currently 'busy'
@@ -55,6 +70,7 @@ data class JibriStatus(
 class JibriStatusManager : StatusPublisher<JibriStatus>() {
     private val logger = Logger.getLogger(this::class.qualifiedName)
     private val subComponentHealth: MutableMap<String, ComponentHealthDetails> = ConcurrentHashMap()
+
     /**
      * The overall [ComponentHealthStatus] for the entire Jibri, calculated by aggregating all sub-component
      * health status

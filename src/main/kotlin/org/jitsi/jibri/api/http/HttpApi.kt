@@ -16,18 +16,22 @@
 
 package org.jitsi.jibri.api.http
 
-import io.ktor.application.Application
-import io.ktor.application.call
-import io.ktor.application.install
-import io.ktor.features.ContentNegotiation
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
-import io.ktor.jackson.jackson
-import io.ktor.request.receive
-import io.ktor.response.respond
-import io.ktor.routing.get
-import io.ktor.routing.post
-import io.ktor.routing.route
-import io.ktor.routing.routing
+import io.ktor.serialization.jackson.jackson
+import io.ktor.server.application.Application
+import io.ktor.server.application.call
+import io.ktor.server.application.install
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.request.receive
+import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
+import io.ktor.server.routing.post
+import io.ktor.server.routing.route
+import io.ktor.server.routing.routing
+import io.prometheus.client.exporter.common.TextFormat
+import jakarta.ws.rs.core.Response
 import org.jitsi.jibri.FileRecordingRequestParams
 import org.jitsi.jibri.JibriBusyException
 import org.jitsi.jibri.JibriManager
@@ -35,15 +39,22 @@ import org.jitsi.jibri.RecordingSinkType
 import org.jitsi.jibri.config.Config
 import org.jitsi.jibri.config.XmppCredentials
 import org.jitsi.jibri.health.JibriHealth
+import org.jitsi.jibri.metrics.JibriMetricsContainer
+import org.jitsi.jibri.metrics.StatsConfig
 import org.jitsi.jibri.selenium.CallParams
+import org.jitsi.jibri.service.JibriServiceStatusHandler
 import org.jitsi.jibri.service.ServiceParams
 import org.jitsi.jibri.service.impl.SipGatewayServiceParams
 import org.jitsi.jibri.service.impl.StreamingParams
 import org.jitsi.jibri.sipgateway.SipClientParams
+import org.jitsi.jibri.status.ComponentState
+import org.jitsi.jibri.status.JibriFailure
+import org.jitsi.jibri.status.JibriSessionStatus
 import org.jitsi.jibri.status.JibriStatusManager
+import org.jitsi.jibri.webhooks.v1.WebhookClient
 import org.jitsi.metaconfig.config
 import org.jitsi.utils.logging2.createLogger
-import javax.ws.rs.core.Response
+import org.jitsi.xmpp.extensions.jibri.JibriIq
 
 // TODO: this needs to include usageTimeout
 data class StartServiceParams(
@@ -65,7 +76,8 @@ data class StartServiceParams(
 
 class HttpApi(
     private val jibriManager: JibriManager,
-    private val jibriStatusManager: JibriStatusManager
+    private val jibriStatusManager: JibriStatusManager,
+    private val webhookClient: WebhookClient
 ) {
     private val logger = createLogger()
 
@@ -101,7 +113,8 @@ class HttpApi(
                         val startServiceParams = call.receive<StartServiceParams>()
                         logger.debug { "Got a start service request with params $startServiceParams" }
 
-                        handleStartService(startServiceParams)
+                        val serviceStatusHandler = createServiceStatusHandler(startServiceParams, webhookClient)
+                        handleStartService(startServiceParams, serviceStatusHandler)
                         call.respond(HttpStatusCode.OK)
                     } catch (e: JibriBusyException) {
                         call.respond(HttpStatusCode.PreconditionFailed, "Jibri is currently busy")
@@ -122,10 +135,84 @@ class HttpApi(
                     call.respond(HttpStatusCode.OK)
                 }
             }
+            if (StatsConfig.enablePrometheus) {
+                logger.info("Enabling prometheus interface at :$port/metrics")
+                get("/metrics") {
+                    val accept = call.request.headers["Accept"]
+                    when {
+                        accept?.startsWith("application/openmetrics-text") == true ->
+                            call.respondText(
+                                JibriMetricsContainer.getPrometheusMetrics(TextFormat.CONTENT_TYPE_OPENMETRICS_100),
+                                contentType = ContentType.parse(TextFormat.CONTENT_TYPE_OPENMETRICS_100)
+                            )
+
+                        accept?.startsWith("text/plain") == true ->
+                            call.respondText(
+                                JibriMetricsContainer.getPrometheusMetrics(TextFormat.CONTENT_TYPE_004),
+                                contentType = ContentType.parse(TextFormat.CONTENT_TYPE_004)
+                            )
+
+                        else ->
+                            call.respondText(
+                                JibriMetricsContainer.jsonString,
+                                contentType = ContentType.parse("application/json")
+                            )
+                    }
+                }
+            }
         }
     }
 
-    private fun handleStartService(startServiceParams: StartServiceParams) {
+    private fun createServiceStatusHandler(
+        serviceParams: StartServiceParams,
+        webhookClient: WebhookClient
+    ): JibriServiceStatusHandler {
+        return { serviceState ->
+            when (serviceState) {
+                is ComponentState.Error -> {
+                    val failure = JibriFailure(
+                        JibriIq.FailureReason.ERROR,
+                        serviceState.error
+                    )
+                    val componentSessionStatus = JibriSessionStatus(
+                        serviceParams.sessionId,
+                        JibriIq.Status.OFF,
+                        serviceParams.sipClientParams?.sipAddress,
+                        failure,
+                        serviceState.error.shouldRetry()
+                    )
+                    logger.info(
+                        "Current service had an error ${serviceState.error}, " +
+                            "sending status error $componentSessionStatus"
+                    )
+                    webhookClient.updateSessionStatus(componentSessionStatus)
+                }
+                is ComponentState.Finished -> {
+                    val componentSessionStatus = JibriSessionStatus(
+                        serviceParams.sessionId,
+                        JibriIq.Status.OFF,
+                        serviceParams.sipClientParams?.sipAddress
+                    )
+                    logger.info("Current service finished, sending status off $componentSessionStatus")
+                    webhookClient.updateSessionStatus(componentSessionStatus)
+                }
+                is ComponentState.Running -> {
+                    val componentSessionStatus = JibriSessionStatus(
+                        serviceParams.sessionId,
+                        JibriIq.Status.ON,
+                        serviceParams.sipClientParams?.sipAddress
+                    )
+                    logger.info("Current service started up successfully, sending status on $componentSessionStatus")
+                    webhookClient.updateSessionStatus(componentSessionStatus)
+                }
+                else -> {
+                    logger.info("Webhook client ignoring service state update: $serviceState")
+                }
+            }
+        }
+    }
+
+    private fun handleStartService(startServiceParams: StartServiceParams, statusHandler: JibriServiceStatusHandler) {
         when (startServiceParams.sinkType) {
             RecordingSinkType.FILE -> {
                 // If it's a file recording, it must have the callLoginParams set
@@ -138,7 +225,8 @@ class HttpApi(
                         startServiceParams.sessionId,
                         callLoginParams
                     ),
-                    environmentContext = null
+                    environmentContext = null,
+                    statusHandler
                 )
             }
             RecordingSinkType.STREAM -> {
@@ -155,7 +243,8 @@ class HttpApi(
                         callLoginParams,
                         youTubeStreamKey
                     ),
-                    environmentContext = null
+                    environmentContext = null,
+                    statusHandler
                 )
             }
             RecordingSinkType.GATEWAY -> {
@@ -169,7 +258,9 @@ class HttpApi(
                         startServiceParams.callParams,
                         startServiceParams.callLoginParams,
                         sipClientParams
-                    )
+                    ),
+                    environmentContext = null,
+                    statusHandler
                 )
             }
         }
